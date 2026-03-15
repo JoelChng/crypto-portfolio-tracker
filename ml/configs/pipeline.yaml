@@ -1,0 +1,107 @@
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  artifacts_dir: artifacts
+
+synthetic:
+  n_wallets: 5000
+  start_date: "2023-01-01"
+  end_date: "2025-01-01"
+  random_seed: 42
+  default_rate_target: 0.06   # ~6% bad events across population
+
+snapshots:
+  interval_days: 30
+  min_wallet_age_days: 14     # wallet must exist >= 14 days before first snapshot
+  embargo_days: 90            # gap between train label window end and test snapshot
+
+labels:
+  horizons: [30, 60, 90]
+  default_horizon: 90
+  bad_event_types:
+    - liquidation
+    - missed_repayment
+    - forced_deleverage
+    - bad_debt_flag
+
+features:
+  enabled_groups:
+    - tenure
+    - cashflow
+    - behavioral
+    - credit_defi
+    - portfolio
+    - fraud
+    - temporal
+  log_transform_cols: []   # populated at runtime by assembler
+  winsorise_pct: 0.01      # 1st/99th percentile capping
+
+training:
+  test_size_months: 6      # out-of-time holdout
+  min_train_months: 6
+  n_cv_folds: 5
+  scoring_metric: roc_auc
+  class_weight: balanced
+  random_seed: 42
+  feature_selection:
+    enabled: true
+    method: importance     # importance | mutual_info | rfe
+    top_k: 40
+
+models:
+  logistic:
+    C: [0.001, 0.01, 0.1, 1.0, 10.0]
+    penalty: [l2, l1]
+    solver: saga
+    max_iter: 2000
+  random_forest:
+    n_estimators: [100, 300]
+    max_depth: [6, 10, null]
+    min_samples_leaf: [10, 20]
+  xgboost:
+    n_estimators: [200, 400]
+    max_depth: [4, 6]
+    learning_rate: [0.05, 0.1]
+    subsample: [0.8]
+    colsample_bytree: [0.8]
+  lightgbm:
+    n_estimators: [200, 400]
+    max_depth: [4, 6]
+    learning_rate: [0.05, 0.1]
+    num_leaves: [31, 63]
+  lstm:
+    hidden_size: 64
+    num_layers: 2
+    dropout: 0.3
+    batch_size: 256
+    epochs: 30
+    lr: 0.001
+    seq_len: 128
+    min_events: 5          # fallback to tabular if fewer events
+
+calibration:
+  method: isotonic         # platt | isotonic
+  cv_folds: 5
+
+scoring:
+  formula: "round(clip(1000 - 900 * pd, 0, 1000))"
+  grade_thresholds:        # upper PD bound for each grade
+    A: 0.02
+    B: 0.05
+    C: 0.12
+    D: 0.25
+    E: 1.00
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+  shap_cache_size: 512
+  default_horizon: 90
+
+champion:
+  model: xgboost           # model to use in production
+  ensemble_weights:        # weighted average of all models
+    logistic: 0.10
+    random_forest: 0.20
+    xgboost: 0.40
+    lightgbm: 0.30

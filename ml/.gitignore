@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# Data (large files — not committed)
+data/raw/
+data/processed/
+
+# Model artifacts (large binaries)
+artifacts/*.pkl
+artifacts/*.pt
+artifacts/*.json
+!artifacts/.gitkeep
+
+# Conda / venv
+miniforge3/
+.venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Notebooks checkpoints
+.ipynb_checkpoints/

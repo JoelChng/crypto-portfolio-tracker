@@ -1,0 +1,123 @@
+# Feature name -> reason code mapping
+# direction: risk_increase means positive SHAP -> higher default risk
+# direction: risk_decrease means positive SHAP -> lower default risk
+
+tenure_wallet_age_days:
+  code: RC01
+  direction: risk_decrease
+  text_high: "Long wallet history ({val:.0f} days) supports creditworthiness."
+  text_low: "Short wallet history ({val:.0f} days) increases credit risk."
+
+tenure_days_since_last_tx:
+  code: RC02
+  direction: risk_increase
+  text_high: "Wallet has been dormant for {val:.0f} days, signalling reduced engagement."
+  text_low: "Recent wallet activity observed."
+
+tenure_tx_count_lifetime:
+  code: RC03
+  direction: risk_decrease
+  text_high: "High lifetime transaction count ({val:.0f}) demonstrates sustained activity."
+  text_low: "Very few lifetime transactions ({val:.0f}) limits credit history."
+
+cashflow_net_flow_usd:
+  code: RC04
+  direction: risk_decrease
+  text_high: "Positive net cashflow (${val:,.0f}) indicates healthy financial position."
+  text_low: "Negative net cashflow (${val:,.0f}) raises liquidity concerns."
+
+cashflow_inflow_stability:
+  code: RC05
+  direction: risk_decrease
+  text_high: "Stable inflow pattern reduces default probability."
+  text_low: "Highly volatile inflows increase uncertainty of repayment capacity."
+
+cashflow_stablecoin_inflow_ratio:
+  code: RC06
+  direction: risk_decrease
+  text_high: "High stablecoin inflow ratio ({val:.0%}) suggests lower speculative exposure."
+  text_low: "Low stablecoin inflows may indicate speculative funding sources."
+
+behavioral_protocol_diversity:
+  code: RC07
+  direction: risk_decrease
+  text_high: "Interaction with {val:.0f} protocols shows DeFi engagement breadth."
+  text_low: "Limited protocol diversity ({val:.0f}) may indicate inexperience."
+
+behavioral_tx_frequency_30d:
+  code: RC08
+  direction: risk_increase
+  text_high: "Very high transaction frequency ({val:.0f}/30d) may indicate stress trading."
+  text_low: "Low recent transaction frequency."
+
+credit_defi_liquidation_count:
+  code: RC09
+  direction: risk_increase
+  text_high: "Prior liquidations ({val:.0f}) are a strong negative credit signal."
+  text_low: "No liquidation history observed."
+
+credit_defi_historical_repayment_ratio:
+  code: RC10
+  direction: risk_decrease
+  text_high: "Strong repayment history ({val:.0%}) is a key positive credit indicator."
+  text_low: "Poor repayment history ({val:.0%}) significantly increases default risk."
+
+credit_defi_max_leverage:
+  code: RC11
+  direction: risk_increase
+  text_high: "Maximum leverage of {val:.1f}x is a significant risk factor."
+  text_low: "Conservative leverage usage observed."
+
+credit_defi_outstanding_debt_usd:
+  code: RC12
+  direction: risk_increase
+  text_high: "Outstanding debt of ${val:,.0f} increases default exposure."
+  text_low: "No significant outstanding debt."
+
+credit_defi_late_repayment_count:
+  code: RC13
+  direction: risk_increase
+  text_high: "{val:.0f} late repayment(s) recorded in history."
+  text_low: "No late repayments on record."
+
+portfolio_stablecoin_ratio:
+  code: RC14
+  direction: risk_decrease
+  text_high: "Stablecoin portfolio ratio of {val:.0%} reduces volatility risk."
+  text_low: "Low stablecoin holdings increase portfolio volatility exposure."
+
+portfolio_concentration:
+  code: RC15
+  direction: risk_increase
+  text_high: "Highly concentrated portfolio (HHI={val:.2f}) increases liquidation risk."
+  text_low: "Diversified portfolio reduces concentration risk."
+
+portfolio_total_value_usd:
+  code: RC16
+  direction: risk_decrease
+  text_high: "Portfolio value of ${val:,.0f} provides a credit buffer."
+  text_low: "Low portfolio value limits credit capacity."
+
+fraud_flash_loan_count:
+  code: RC17
+  direction: risk_increase
+  text_high: "{val:.0f} flash loan interaction(s) detected."
+  text_low: "No flash loan activity."
+
+fraud_rapid_fund_movement_flag:
+  code: RC18
+  direction: risk_increase
+  text_high: "Rapid fund movement pattern detected, possible sybil risk."
+  text_low: "No unusual fund movement patterns."
+
+temporal_burst_score:
+  code: RC19
+  direction: risk_increase
+  text_high: "Bursty transaction behaviour (score={val:.2f}) may indicate stress events."
+  text_low: "Consistent transaction timing observed."
+
+temporal_tx_gap_cv:
+  code: RC20
+  direction: risk_increase
+  text_high: "High variance in transaction timing (CV={val:.2f})."
+  text_low: "Regular transaction cadence is a positive indicator."
