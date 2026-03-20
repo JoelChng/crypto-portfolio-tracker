@@ -55,20 +55,29 @@ function scoreDiversity(tokens) {
   const totalValue = tokens.reduce((s, t) => s + (t.usdValue ?? 0), 0)
   if (totalValue === 0) return { score: 50, explanation: 'No token value data available.' }
 
-  // Tokens outside top-50 (rank > 50 or null = outside top-100)
+  // Use CoinMarketCap rank (cmcRank) to determine top-50 membership.
+  // cmcRank is 1–50 if in CMC top-50, null if outside.
+  // Falls back to CoinGecko rank when CMC API key is not configured.
   const outsideTop50Value = tokens
-    .filter(t => t.riskLevel === 3 || (t.rank != null && t.rank > 50))
+    .filter(t => {
+      const rank = t.cmcRank ?? t.rank   // prefer CMC rank, fall back to CoinGecko
+      return rank == null || rank > 50
+    })
     .reduce((s, t) => s + (t.usdValue ?? 0), 0)
 
   const ratio = outsideTop50Value / totalValue
   const score = ratio * 100
 
-  const pct = (ratio * 100).toFixed(0)
+  const pct    = (ratio * 100).toFixed(0)
+  const source = tokens.some(t => t.cmcRank !== undefined) ? 'CoinMarketCap' : 'CoinGecko'
+
   const explanation =
     ratio === 0
-      ? 'All holdings are in top-50 tokens by market cap.'
-      : `${pct}% of your portfolio is in tokens outside the top 50 by market cap, ` +
-        (ratio > 0.5 ? 'which significantly increases your risk exposure.' : 'adding moderate risk.')
+      ? `All holdings are in the top-50 cryptocurrencies by market cap (${source}).`
+      : `${pct}% of your portfolio is outside the top-50 by market cap (${source}), ` +
+        (ratio > 0.5
+          ? 'which significantly increases your risk exposure.'
+          : 'adding moderate risk.')
 
   return { score, explanation }
 }

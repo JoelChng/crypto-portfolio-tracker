@@ -13,8 +13,8 @@ function getCategory(score) {
 
 export default function RiskGauge({ risk }) {
   const canvasRef = useRef(null)
-  const score = risk ? Math.round(risk.compositeScore) : null
-  const category = score != null ? getCategory(score) : null
+  const score     = risk ? Math.round(risk.compositeScore) : null
+  const category  = score != null ? getCategory(score) : null
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -22,98 +22,147 @@ export default function RiskGauge({ risk }) {
     const ctx = canvas.getContext('2d')
     const W = canvas.width, H = canvas.height
     const cx = W / 2, cy = H * 0.72
-    const R = W * 0.38
+    const R  = W * 0.36
 
     ctx.clearRect(0, 0, W, H)
 
-    // Background arc
+    // Track
     ctx.beginPath()
     ctx.arc(cx, cy, R, Math.PI, 0)
-    ctx.lineWidth = 16
-    ctx.strokeStyle = '#2a2d3e'
-    ctx.lineCap = 'round'
+    ctx.lineWidth  = 18
+    ctx.strokeStyle = '#1e2a3a'
+    ctx.lineCap    = 'round'
     ctx.stroke()
 
-    // Coloured arc segments
-    const segments = [
+    // Coloured segments
+    const segs = [
       { from: 0,  to: 30,  colour: '#22c55e' },
       { from: 30, to: 55,  colour: '#eab308' },
       { from: 55, to: 75,  colour: '#f97316' },
       { from: 75, to: 100, colour: '#ef4444' },
     ]
-    segments.forEach(seg => {
+    segs.forEach(seg => {
       const aStart = Math.PI + (seg.from / 100) * Math.PI
       const aEnd   = Math.PI + (seg.to   / 100) * Math.PI
       ctx.beginPath()
       ctx.arc(cx, cy, R, aStart, aEnd)
-      ctx.lineWidth = 16
+      ctx.lineWidth  = 18
       ctx.strokeStyle = seg.colour
-      ctx.lineCap = 'butt'
+      ctx.lineCap    = 'butt'
       ctx.stroke()
     })
 
-    // Needle
+    // Active glow on the needle endpoint
     const angle = Math.PI + (score / 100) * Math.PI
-    const nx = cx + (R - 8) * Math.cos(angle)
-    const ny = cy + (R - 8) * Math.sin(angle)
+    const nx = cx + (R - 10) * Math.cos(angle)
+    const ny = cy + (R - 10) * Math.sin(angle)
+
+    ctx.save()
+    ctx.shadowColor = category?.colour ?? '#fff'
+    ctx.shadowBlur  = 10
+
+    // Needle
     ctx.beginPath()
     ctx.moveTo(cx, cy)
     ctx.lineTo(nx, ny)
-    ctx.lineWidth = 3
+    ctx.lineWidth  = 3
     ctx.strokeStyle = '#ffffff'
-    ctx.lineCap = 'round'
+    ctx.lineCap    = 'round'
     ctx.stroke()
+
+    ctx.restore()
 
     // Centre dot
     ctx.beginPath()
     ctx.arc(cx, cy, 5, 0, 2 * Math.PI)
     ctx.fillStyle = '#ffffff'
     ctx.fill()
-  }, [score])
+  }, [score, category])
 
   return (
-    <div className="rounded-lg p-5 h-full" style={{ backgroundColor: '#1a1d27', border: '1px solid #2a2d3e' }}>
-      <h2 className="font-semibold text-white mb-4">Risk Profile</h2>
+    <div className="rounded-xl p-5 h-full flex flex-col card-glow"
+         style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-card)' }}>
+
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="font-semibold text-white text-sm">Risk Profile</h2>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+            Rule-based · 3 signals
+          </p>
+        </div>
+        <span className="badge" style={{ backgroundColor: 'rgba(59,130,246,0.1)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.2)' }}>
+          ⚡ Live
+        </span>
+      </div>
 
       {score == null ? (
-        <p className="text-slate-500 text-sm">Risk data unavailable.</p>
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Risk data unavailable.</p>
       ) : (
         <>
-          <canvas ref={canvasRef} width={260} height={160} className="w-full max-w-[260px] mx-auto block" />
+          <canvas ref={canvasRef} width={260} height={155} className="w-full max-w-[260px] mx-auto block" />
 
-          <div className="text-center mt-1">
-            <p className="text-4xl font-bold text-white">{score}</p>
-            <p className="text-sm font-medium mt-0.5" style={{ color: category.colour }}>
+          <div className="text-center mt-1 mb-4">
+            <p className="text-4xl font-black text-white">{score}</p>
+            <p className="text-sm font-semibold mt-0.5" style={{ color: category.colour }}>
               {category.emoji} {category.label}
             </p>
+            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>out of 100</p>
           </div>
 
           {/* Signal breakdown */}
           {risk.breakdown && (
-            <div className="mt-5 space-y-3">
-              <SignalBar label="Holdings Composition" score={risk.breakdown.holdingsScore} weight="40%" explanation={risk.breakdown.holdingsExplanation} />
-              <SignalBar label="Transaction Frequency" score={risk.breakdown.frequencyScore} weight="30%" explanation={risk.breakdown.frequencyExplanation} />
-              <SignalBar label="Market Cap Diversity"  score={risk.breakdown.diversityScore} weight="30%" explanation={risk.breakdown.diversityExplanation} />
+            <div className="space-y-3 mt-auto">
+              <SignalBar label="Holdings Composition"  score={risk.breakdown.holdingsScore}  weight="40%" explanation={risk.breakdown.holdingsExplanation} />
+              <SignalBar label="Tx Frequency"          score={risk.breakdown.frequencyScore} weight="30%" explanation={risk.breakdown.frequencyExplanation} />
+              {/* Diversity is inverted: display = 100 - diversityScore so full bar = all in CMC top-50 */}
+              <SignalBar
+                label="CMC Top-50 Coverage"
+                score={100 - risk.breakdown.diversityScore}
+                weight="30%"
+                explanation={risk.breakdown.diversityExplanation}
+                invert
+              />
             </div>
           )}
+
+          {/* Source */}
+          <div className="mt-4 pt-3 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              Powered by{' '}
+              <a href="https://github.com/JoelChng/crypto-portfolio-tracker"
+                 target="_blank" rel="noreferrer"
+                 className="hover:text-white transition-colors" style={{ color: '#3b82f6' }}>
+                crypto-portfolio-tracker
+              </a>
+            </p>
+          </div>
         </>
       )}
     </div>
   )
 }
 
-function SignalBar({ label, score, weight, explanation }) {
-  const colour = score <= 30 ? '#22c55e' : score <= 55 ? '#eab308' : score <= 75 ? '#f97316' : '#ef4444'
+function SignalBar({ label, score, weight, explanation, invert }) {
+  const colour = invert
+    ? (score >= 70 ? '#22c55e' : score >= 45 ? '#eab308' : score >= 25 ? '#f97316' : '#ef4444')
+    : (score <= 30 ? '#22c55e' : score <= 55 ? '#eab308' : score <= 75 ? '#f97316' : '#ef4444')
   return (
     <div>
       <div className="flex justify-between text-xs mb-1">
-        <span className="text-slate-400">{label} <span className="text-slate-600">({weight})</span></span>
-        <span className="font-medium" style={{ color: colour }}>{Math.round(score)}</span>
+        <span style={{ color: 'var(--text-secondary)' }}>
+          {label}{' '}
+          <span style={{ color: 'var(--text-muted)' }}>({weight})</span>
+        </span>
+        <span className="font-semibold" style={{ color: colour }}>{Math.round(score)}</span>
       </div>
-      <div className="w-full bg-slate-700 rounded-full h-1.5">
-        <div className="h-1.5 rounded-full transition-all" style={{ width: `${Math.min(score, 100)}%`, backgroundColor: colour }} />
+      <div className="w-full h-1.5 rounded-full" style={{ backgroundColor: 'var(--border-card)' }}>
+        <div className="h-1.5 rounded-full transition-all duration-500"
+             style={{ width: `${Math.min(score, 100)}%`, backgroundColor: colour }} />
       </div>
-      {explanation && <p className="text-xs text-slate-500 mt-1">{explanation}</p>}
+      {explanation && (
+        <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{explanation}</p>
+      )}
     </div>
   )
 }

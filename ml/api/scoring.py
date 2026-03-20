@@ -134,7 +134,7 @@ class CreditScorer:
         explain: bool = True,
     ) -> CreditScoreResponse:
         if snapshot_date is None:
-            snapshot_date = pd.Timestamp.now()
+            snapshot_date = pd.Timestamp.now(tz='UTC')
 
         x_raw, feature_values = self._build_feature_row(events_df, wallet_address, snapshot_date)
         pds = self._predict_pd(x_raw)

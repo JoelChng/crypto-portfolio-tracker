@@ -48,6 +48,28 @@ training:
     method: importance     # importance | mutual_info | rfe
     top_k: 40
 
+  # ── Two-stage MLP (models/two_stage_trainer.py) ────────────────────────
+  # train_all.py ignores these sub-keys; two_stage_trainer.py reads only them.
+  pretrain:                # Stage 1 — pretrain on synthetic data
+    epochs: 50
+    learning_rate: 0.001
+    batch_size: 512
+    hidden_dims: [128, 64, 32]
+    dropout: 0.3
+    patience: 10           # early-stopping patience (epochs with no val improvement)
+
+  finetune:                # Stage 2 — fine-tune on real data
+    epochs: 30
+    learning_rate: 0.0001  # 10× lower than pretrain.learning_rate
+    batch_size: 128
+    patience: 7
+
+  eval:
+    val_split: 0.15        # fraction of real data held out for validation / calibration
+    test_split: 0.15       # fraction of real data held out for final evaluation
+    metrics: [roc_auc, pr_auc, brier_score, calibration]
+    random_seed: 42
+
 models:
   logistic:
     C: [0.001, 0.01, 0.1, 1.0, 10.0]
@@ -105,3 +127,26 @@ champion:
     random_forest: 0.20
     xgboost: 0.40
     lightgbm: 0.30
+
+# ─── Dune Analytics on-chain data ingestion ──────────────────────────────────
+dune:
+  api_key_env: DUNE_API_KEY      # env var name — export DUNE_API_KEY=your_key
+
+  date_range:
+    start: "2024-10-01"
+    end:   "2025-01-01"
+
+  chains: [ethereum]
+  protocols: [aave_v3, compound_v3]
+
+  # Pre-saved Dune query IDs (optional but recommended — avoids re-running SQL
+  # on every fetch, which saves API credits and is faster).
+  # To use: save the SQL from data/dune_fetcher.py on app.dune.com, copy the
+  # integer query ID from the URL (e.g. dune.com/queries/1234567), paste below.
+  # Leave null to run the inline SQL automatically (requires CRUD API access).
+  query_ids:
+    aave_v3:     null            # e.g. 1234567
+    compound_v3: null            # e.g. 7654321
+
+  max_wallets: 50000             # cap to control memory; largest wallets kept
+  min_events_per_wallet: 3       # drop near-empty wallets (likely noise/bots)

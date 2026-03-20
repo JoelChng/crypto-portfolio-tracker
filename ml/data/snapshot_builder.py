@@ -49,10 +49,9 @@ def events_before_snapshot(
     Authoritative gating function — always use this, never reimplement inline.
     Returns events for a wallet strictly BEFORE snapshot_date (exclusive).
     """
-    mask = (
-        (events_df["wallet_address"] == wallet_address) &
-        (pd.to_datetime(events_df["timestamp"]) < snapshot_date)
-    )
+    ts = pd.to_datetime(events_df["timestamp"], utc=True)
+    cutoff = pd.Timestamp(snapshot_date, tz='UTC') if snapshot_date.tzinfo is None else snapshot_date
+    mask = (events_df["wallet_address"] == wallet_address) & (ts < cutoff)
     return events_df[mask].copy()
 
 

@@ -16,6 +16,7 @@ import pandas as pd
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from api.schemas import CreditScoreResponse, BatchScoreRequest, HealthResponse
@@ -76,6 +77,11 @@ class ScoreRequest(BaseModel):
     explain: bool = True
 
 
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse(url="/docs")
+
+
 @app.get("/health", response_model=HealthResponse)
 def health():
     loaded = list(scorer._models.keys()) if scorer else []
@@ -87,11 +93,10 @@ def score_wallet(req: ScoreRequest):
     if not scorer or not scorer._models:
         raise HTTPException(503, "Models not loaded. Run training pipeline first.")
 
-    if not req.events:
-        raise HTTPException(400, "No event data provided. Pass 'events' array.")
-
     try:
-        events_df = pd.DataFrame(req.events)
+        empty_cols = ["timestamp","event_type","token","usd_amount",
+                      "protocol","gas_fee_usd","health_factor","debt_after_usd"]
+        events_df = pd.DataFrame(req.events) if req.events else pd.DataFrame(columns=empty_cols)
         events_df["wallet_address"] = req.wallet_address
         result = scorer.score_wallet(
             events_df=events_df,

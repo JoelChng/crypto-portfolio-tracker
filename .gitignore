@@ -4,6 +4,10 @@
 # Environment
 server/.env
 client/.env
+ml/.env
+
+# ML checkpoints (large binary files — track metrics/results only)
+ml/models/checkpoints/
 
 # Dependencies
 node_modules/

@@ -1,0 +1,24 @@
+{
+  "finetuned": {
+    "label": "finetuned  (pretrain \u2192 fine-tune)",
+    "n": 3346,
+    "pos_rate": 0.014345487579703331,
+    "roc_auc": 0.6605834344046896,
+    "pr_auc": 0.02778525325721444,
+    "brier_score": 0.014854222536087036
+  },
+  "baseline": {
+    "label": "baseline   (real data only, scratch)",
+    "n": 3346,
+    "pos_rate": 0.014345487579703331,
+    "roc_auc": 0.6062070446735395,
+    "pr_auc": 0.024046360934136167,
+    "brier_score": 0.014162600971758366
+  },
+  "uplift": {
+    "roc_auc_uplift": 0.0544,
+    "pr_auc_uplift": 0.0037,
+    "brier_score_delta": -0.0007
+  },
+  "horizon_days": 90
+}

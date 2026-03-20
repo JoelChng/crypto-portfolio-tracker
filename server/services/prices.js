@@ -1,11 +1,16 @@
-const axios = require('axios')
+const axios     = require('axios')
 const NodeCache = require('node-cache')
 
-const cache = new NodeCache({ stdTTL: 300 })
+const cache = new NodeCache({ stdTTL: 300 })   // 5-min TTL for prices
+const cmcCache = new NodeCache({ stdTTL: 3600 }) // 1-hour TTL for CMC rankings
 
 const COINGECKO_BASE = 'https://api.coingecko.com/api/v3'
+const CMC_BASE       = 'https://pro-api.coinmarketcap.com/v1'
 
-// Top-100 coins by market cap with their rank (fetched once, cached 5 min)
+// ─────────────────────────────────────────────
+//  CoinGecko — prices + top-100 ranks
+// ─────────────────────────────────────────────
+
 async function getMarketRanks() {
   const key = 'market_ranks'
   if (cache.has(key)) return cache.get(key)
@@ -13,14 +18,14 @@ async function getMarketRanks() {
   const res = await axios.get(`${COINGECKO_BASE}/coins/markets`, {
     params: {
       vs_currency: 'usd',
-      order: 'market_cap_desc',
-      per_page: 100,
-      page: 1,
-      sparkline: false,
+      order:       'market_cap_desc',
+      per_page:    100,
+      page:        1,
+      sparkline:   false,
     },
   })
 
-  // Map: symbol (uppercase) → { rank, id, priceUsd }
+  // Map: SYMBOL (uppercase) → { rank, id, priceUsd }
   const ranks = {}
   res.data.forEach((coin, idx) => {
     ranks[coin.symbol.toUpperCase()] = {
@@ -30,19 +35,64 @@ async function getMarketRanks() {
     }
   })
 
-  // ETH always present
   cache.set(key, ranks)
   return ranks
 }
 
-// Enrich token list with prices and risk levels
-async function enrichTokens(tokens) {
-  const ranks = await getMarketRanks()
+// ─────────────────────────────────────────────
+//  CoinMarketCap — top-50 market cap rankings
+//  Used exclusively by scoreDiversity()
+// ─────────────────────────────────────────────
 
-  // For tokens not in top-100, try a batch price lookup by contract address
-  // (CoinGecko free tier supports this)
+async function getCMCTop50() {
+  const key = 'cmc_top50'
+  if (cmcCache.has(key)) return cmcCache.get(key)
+
+  const apiKey = process.env.CMC_API_KEY
+  if (!apiKey || apiKey === 'your_coinmarketcap_api_key_here') {
+    return null // key not configured — caller will fall back to CoinGecko rank
+  }
+
+  try {
+    const res = await axios.get(`${CMC_BASE}/cryptocurrency/listings/latest`, {
+      headers: { 'X-CMC_PRO_API_KEY': apiKey },
+      params: {
+        start:   1,
+        limit:   50,
+        convert: 'USD',
+        sort:    'market_cap',
+      },
+    })
+
+    // Map: SYMBOL (uppercase) → cmcRank (1-50)
+    const ranks = {}
+    for (const coin of res.data.data) {
+      ranks[coin.symbol.toUpperCase()] = coin.cmc_rank
+    }
+
+    cmcCache.set(key, ranks)
+    return ranks
+  } catch (err) {
+    console.error('CMC API error:', err.response?.data?.status?.error_message ?? err.message)
+    return null // fall back to CoinGecko rank
+  }
+}
+
+// ─────────────────────────────────────────────
+//  Enrich token list with prices, CoinGecko rank,
+//  and CMC top-50 rank
+// ─────────────────────────────────────────────
+
+async function enrichTokens(tokens) {
+  // Fetch CoinGecko ranks (prices) + CMC top-50 in parallel
+  const [cgRanks, cmcRanks] = await Promise.all([
+    getMarketRanks(),
+    getCMCTop50(),
+  ])
+
+  // For tokens not in CoinGecko top-100, batch price lookup by contract address
   const unknownAddresses = tokens
-    .filter(t => t.tokenAddress !== 'native' && !ranks[t.symbol?.toUpperCase()])
+    .filter(t => t.tokenAddress !== 'native' && !cgRanks[t.symbol?.toUpperCase()])
     .map(t => t.tokenAddress)
     .filter(Boolean)
 
@@ -52,7 +102,7 @@ async function enrichTokens(tokens) {
       const res = await axios.get(`${COINGECKO_BASE}/simple/token_price/ethereum`, {
         params: {
           contract_addresses: unknownAddresses.slice(0, 30).join(','),
-          vs_currencies: 'usd',
+          vs_currencies:      'usd',
         },
       })
       extraPrices = res.data
@@ -61,41 +111,47 @@ async function enrichTokens(tokens) {
     }
   }
 
+  const STABLECOINS = new Set(['USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'FRAX', 'LUSD', 'USDP'])
+
   return tokens.map(token => {
-    const symbolKey = token.symbol?.toUpperCase()
-    const rankEntry = ranks[symbolKey]
+    const symbolKey  = token.symbol?.toUpperCase()
+    const cgEntry    = cgRanks[symbolKey]
     let priceUsd = null
-    let rank = null
+    let cgRank   = null
 
     if (token.tokenAddress === 'native') {
-      // ETH
-      priceUsd = ranks['ETH']?.priceUsd ?? null
-      rank = ranks['ETH']?.rank ?? 1
-    } else if (rankEntry) {
-      priceUsd = rankEntry.priceUsd
-      rank = rankEntry.rank
+      priceUsd = cgRanks['ETH']?.priceUsd ?? null
+      cgRank   = cgRanks['ETH']?.rank ?? 1
+    } else if (cgEntry) {
+      priceUsd = cgEntry.priceUsd
+      cgRank   = cgEntry.rank
     } else if (extraPrices[token.tokenAddress?.toLowerCase()]) {
       priceUsd = extraPrices[token.tokenAddress.toLowerCase()].usd
-      rank = null // not in top 100
+      cgRank   = null // not in top-100
     }
 
     const usdValue = priceUsd != null ? token.balance * priceUsd : 0
 
-    // Risk level: 0=stablecoin, 1=large cap (1-10), 2=mid cap (11-100), 3=small cap
-    const STABLECOINS = new Set(['USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'FRAX', 'LUSD', 'USDP'])
+    // CoinGecko-based risk tier (used by scoreHoldings)
     let riskLevel
     if (STABLECOINS.has(symbolKey)) {
       riskLevel = 0
-    } else if (rank != null && rank <= 10) {
+    } else if (cgRank != null && cgRank <= 10) {
       riskLevel = 1
-    } else if (rank != null && rank <= 100) {
+    } else if (cgRank != null && cgRank <= 100) {
       riskLevel = 2
     } else {
       riskLevel = 3
     }
 
-    return { ...token, priceUsd, usdValue, riskLevel, rank }
+    // CoinMarketCap rank — used exclusively by scoreDiversity
+    // If CMC data available: use CMC rank; otherwise fall back to CoinGecko rank
+    const cmcRank = cmcRanks
+      ? (cmcRanks[symbolKey] ?? null)   // null = not in CMC top-50
+      : cgRank                           // CMC unavailable — fall back to CoinGecko rank
+
+    return { ...token, priceUsd, usdValue, riskLevel, rank: cgRank, cmcRank }
   })
 }
 
-module.exports = { enrichTokens, getMarketRanks }
+module.exports = { enrichTokens, getMarketRanks, getCMCTop50 }

@@ -1,162 +1,192 @@
-const axios = require('axios')
-const NodeCache = require('node-cache')
+/**
+ * On-chain data via Etherscan API V2 (free tier).
+ *
+ * Endpoints used:
+ *   account/balance       – native ETH balance
+ *   account/tokentx       – ERC-20 transfer history (derive token list)
+ *   account/tokenbalance  – current balance for a single ERC-20 contract
+ *   account/txlist        – normal ETH transactions
+ *
+ * Note: tokenlist / addresstokenbalance are Pro-only on V2; we derive
+ * token holdings from tokentx history + per-token balance lookups instead.
+ */
 
-const cache = new NodeCache({ stdTTL: 300 }) // 5-minute TTL
+const axios      = require('axios')
+const NodeCache  = require('node-cache')
 
-const MORALIS_BASE = 'https://deep-index.moralis.io/api/v2.2'
-const COVALENT_BASE = 'https://api.covalenthq.com/v1'
+const cache = new NodeCache({ stdTTL: 300 }) // 5-min TTL
 
-function moralisHeaders() {
-  return { 'X-API-Key': process.env.MORALIS_API_KEY }
+const ETHERSCAN_BASE = 'https://api.etherscan.io/v2/api'
+
+/** Attach API key + chainid=1 (Ethereum mainnet) to every request */
+function p(extra) {
+  return { chainid: 1, apikey: process.env.ETHERSCAN_API_KEY || '', ...extra }
 }
 
-// ---------- Balances ----------
+/** Safely parse an Etherscan result array (returns [] on NOTOK / errors) */
+function safeArray(res) {
+  return res.data?.status === '1' && Array.isArray(res.data.result)
+    ? res.data.result
+    : []
+}
 
-async function getTokenBalancesMoralis(address) {
-  const key = `balances:${address}`
-  if (cache.has(key)) return cache.get(key)
+// ──────────────────────────────────────────────────
+//  Token Balances
+// ──────────────────────────────────────────────────
 
-  const [erc20Res, ethRes] = await Promise.all([
-    axios.get(`${MORALIS_BASE}/${address}/erc20`, {
-      headers: moralisHeaders(),
-      params: { chain: 'eth' },
+async function getTokenBalances(address) {
+  const cacheKey = `balances:${address}`
+  if (cache.has(cacheKey)) return cache.get(cacheKey)
+
+  // ETH balance + ERC-20 transfer history in parallel
+  const [ethRes, erc20tokens] = await Promise.all([
+    axios.get(ETHERSCAN_BASE, {
+      params: p({ module: 'account', action: 'balance', address, tag: 'latest' }),
     }),
-    axios.get(`${MORALIS_BASE}/${address}/balance`, {
-      headers: moralisHeaders(),
-      params: { chain: 'eth' },
-    }),
+    getTokensFromTransferHistory(address),
   ])
 
-  const tokens = erc20Res.data.map(t => ({
-    symbol:       t.symbol,
-    name:         t.name,
-    tokenAddress: t.token_address,
-    logo:         t.logo ?? t.thumbnail ?? null,
-    balance:      Number(t.balance) / Math.pow(10, Number(t.decimals)),
-    decimals:     Number(t.decimals),
-  }))
+  const tokens = []
 
-  // Add native ETH
-  const ethBalance = Number(ethRes.data.balance) / 1e18
-  if (ethBalance > 0) {
-    tokens.unshift({
+  // ── Native ETH ──
+  const ethBal = Number(ethRes.data?.result ?? 0) / 1e18
+  if (ethBal > 0.000001) {
+    tokens.push({
       symbol:       'ETH',
       name:         'Ethereum',
       tokenAddress: 'native',
-      logo:         null,
-      balance:      ethBalance,
+      logo:         'https://assets.coingecko.com/coins/images/279/small/ethereum.png',
+      balance:      ethBal,
       decimals:     18,
     })
   }
 
-  cache.set(key, tokens)
+  tokens.push(...erc20tokens)
+  cache.set(cacheKey, tokens)
   return tokens
 }
 
-async function getTokenBalancesCovalent(address) {
-  const key = `balances_cov:${address}`
-  if (cache.has(key)) return cache.get(key)
+/**
+ * Derives held ERC-20 tokens from transfer history, then fetches current
+ * balance for each unique contract (tokenlist is Pro-only on V2 free tier).
+ */
+async function getTokensFromTransferHistory(address) {
+  const res   = await axios.get(ETHERSCAN_BASE, {
+    params: p({ module: 'account', action: 'tokentx', address, page: 1, offset: 200, sort: 'desc' }),
+  })
+  const txns = safeArray(res)
 
-  const res = await axios.get(
-    `${COVALENT_BASE}/eth-mainnet/address/${address}/balances_v2/`,
-    {
-      auth: { username: process.env.COVALENT_API_KEY, password: '' },
+  // Unique contracts seen in transfers
+  const contracts = {}
+  for (const tx of txns) {
+    if (tx.contractAddress && !contracts[tx.contractAddress]) {
+      contracts[tx.contractAddress] = { symbol: tx.tokenSymbol, name: tx.tokenName, decimals: Number(tx.tokenDecimal ?? 18) }
     }
-  )
-
-  const items = res.data.data.items ?? []
-  const tokens = items
-    .filter(t => t.balance !== '0')
-    .map(t => ({
-      symbol:       t.contract_ticker_symbol,
-      name:         t.contract_name,
-      tokenAddress: t.contract_address,
-      logo:         t.logo_url ?? null,
-      balance:      Number(t.balance) / Math.pow(10, t.contract_decimals),
-      decimals:     t.contract_decimals,
-    }))
-
-  cache.set(key, tokens)
-  return tokens
-}
-
-async function getTokenBalances(address) {
-  if (process.env.MORALIS_API_KEY) {
-    return getTokenBalancesMoralis(address)
   }
-  return getTokenBalancesCovalent(address)
+
+  const tokens = []
+  // Rate limit: Etherscan free = 5 req/s; batch with small pauses
+  const entries = Object.entries(contracts).slice(0, 20)
+  for (const [contractAddress, meta] of entries) {
+    try {
+      const r = await axios.get(ETHERSCAN_BASE, {
+        params: p({ module: 'account', action: 'tokenbalance', contractaddress: contractAddress, address, tag: 'latest' }),
+      })
+      const raw = Number(r.data?.result ?? 0)
+      const bal = raw / Math.pow(10, meta.decimals)
+      if (bal > 0) {
+        tokens.push({
+          symbol:       meta.symbol || 'TOKEN',
+          name:         meta.name   || meta.symbol,
+          tokenAddress: contractAddress,
+          logo:         null,
+          balance:      bal,
+          decimals:     meta.decimals,
+        })
+      }
+    } catch { /* skip token on error */ }
+  }
+  return tokens
 }
 
-// ---------- Transactions ----------
-
-async function getTransactionsMoralis(address) {
-  const key = `txns:${address}`
-  if (cache.has(key)) return cache.get(key)
-
-  const res = await axios.get(`${MORALIS_BASE}/${address}/verbose`, {
-    headers: moralisHeaders(),
-    params: { chain: 'eth', limit: 50 },
-  })
-
-  const txns = (res.data.result ?? []).map(tx => {
-    const isReceive = tx.to_address?.toLowerCase() === address.toLowerCase()
-    const isSend    = tx.from_address?.toLowerCase() === address.toLowerCase()
-    let type = 'other'
-    if (tx.decoded_call?.label?.toLowerCase().includes('swap')) type = 'swap'
-    else if (isReceive) type = 'receive'
-    else if (isSend)    type = 'send'
-
-    return {
-      hash:        tx.hash,
-      date:        tx.block_timestamp,
-      type,
-      tokenSymbol: 'ETH',
-      amount:      Number(tx.value) / 1e18,
-      usdValue:    null, // Historical USD value not available in free tier
-    }
-  })
-
-  cache.set(key, txns)
-  return txns
-}
-
-async function getTransactionsCovalent(address) {
-  const key = `txns_cov:${address}`
-  if (cache.has(key)) return cache.get(key)
-
-  const res = await axios.get(
-    `${COVALENT_BASE}/eth-mainnet/address/${address}/transactions_v3/`,
-    {
-      auth: { username: process.env.COVALENT_API_KEY, password: '' },
-      params: { 'page-size': 50 },
-    }
-  )
-
-  const items = res.data.data.items ?? []
-  const txns = items.map(tx => {
-    const isReceive = tx.to_address?.toLowerCase() === address.toLowerCase()
-    const isSend    = tx.from_address?.toLowerCase() === address.toLowerCase()
-    const type = isReceive ? 'receive' : isSend ? 'send' : 'other'
-
-    return {
-      hash:        tx.tx_hash,
-      date:        tx.block_signed_at,
-      type,
-      tokenSymbol: 'ETH',
-      amount:      Number(tx.value) / 1e18,
-      usdValue:    tx.value_quote ?? null,
-    }
-  })
-
-  cache.set(key, txns)
-  return txns
-}
+// ──────────────────────────────────────────────────
+//  Transaction History
+// ──────────────────────────────────────────────────
 
 async function getTransactions(address) {
-  if (process.env.MORALIS_API_KEY) {
-    return getTransactionsMoralis(address)
-  }
-  return getTransactionsCovalent(address)
+  const cacheKey = `txns:${address}`
+  if (cache.has(cacheKey)) return cache.get(cacheKey)
+
+  // Fetch normal ETH txns + ERC-20 transfers in parallel
+  const [normalRes, erc20Res] = await Promise.all([
+    axios.get(ETHERSCAN_BASE, {
+      params: p({ module: 'account', action: 'txlist', address,
+                  startblock: 0, endblock: 99999999,
+                  page: 1, offset: 50, sort: 'desc' }),
+    }),
+    axios.get(ETHERSCAN_BASE, {
+      params: p({ module: 'account', action: 'tokentx', address,
+                  page: 1, offset: 50, sort: 'desc' }),
+    }),
+  ])
+
+  const addrLower = address.toLowerCase()
+
+  // ── Normal ETH transfers ──
+  const normalTxns = safeArray(normalRes)
+    .filter(tx => tx.isError === '0' && Number(tx.value) > 0)
+    .map(tx => {
+      const isReceive = tx.to?.toLowerCase()   === addrLower
+      const isSend    = tx.from?.toLowerCase() === addrLower
+      const isSwap    = tx.functionName?.toLowerCase().includes('swap')
+      let type = 'other'
+      if (isSwap)    type = 'swap'
+      else if (isReceive) type = 'receive'
+      else if (isSend)    type = 'send'
+
+      return {
+        hash:        tx.hash,
+        date:        new Date(Number(tx.timeStamp) * 1000).toISOString(),
+        type,
+        tokenSymbol: 'ETH',
+        amount:      Number(tx.value) / 1e18,
+        usdValue:    null,
+        from:        tx.from,
+        to:          tx.to,
+      }
+    })
+
+  // ── ERC-20 transfers ──
+  const erc20Txns = safeArray(erc20Res)
+    .map(tx => {
+      const isReceive = tx.to?.toLowerCase() === addrLower
+      const dec = Number(tx.tokenDecimal ?? 18)
+      return {
+        hash:        tx.hash,
+        date:        new Date(Number(tx.timeStamp) * 1000).toISOString(),
+        type:        isReceive ? 'receive' : 'send',
+        tokenSymbol: tx.tokenSymbol || 'TOKEN',
+        amount:      Number(tx.value) / Math.pow(10, dec),
+        usdValue:    null,
+        from:        tx.from,
+        to:          tx.to,
+      }
+    })
+
+  // Merge, deduplicate (same hash+symbol), sort newest first, cap at 50
+  const seen = new Set()
+  const merged = [...normalTxns, ...erc20Txns]
+    .filter(tx => {
+      const key = `${tx.hash}:${tx.tokenSymbol}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .sort((a, b) => new Date(b.date) - new Date(a.date))
+    .slice(0, 50)
+
+  cache.set(cacheKey, merged)
+  return merged
 }
 
 module.exports = { getTokenBalances, getTransactions }
