@@ -18,8 +18,8 @@ Paste your Ethereum wallet address to get:
 |---|---|
 | Frontend | React + Vite + Tailwind CSS |
 | Backend | Node.js + Express |
-| On-chain data | Moralis API (Covalent fallback) |
-| Live prices | CoinGecko API |
+| On-chain data | Etherscan API v2 |
+| Live prices | CoinGecko API (CoinMarketCap for top-50 ranks) |
 | Database | SQLite |
 
 ## Quick Start
@@ -29,9 +29,9 @@ Paste your Ethereum wallet address to get:
 cd server && npm install
 cd ../client && npm install
 
-# 2. Configure API key
+# 2. Configure API keys
 cp server/.env.example server/.env
-# Add your MORALIS_API_KEY to server/.env
+# Add your ETHERSCAN_API_KEY (and optional CMC_API_KEY) to server/.env
 
 # 3. Run both servers
 cd .. && npm run dev
